@@ -88,20 +88,12 @@ class_member = a:var_name _ ":" _ b:type {
 access_modifier= "public" / "private"
 
 class_=
-	"type" __ a:var_name _ "=" _ b:type ";" {return "\n#define "+a+" "+b+"\n";}
+	"type" __ a:var_name _ "=" _ b:type ";" {return "\ntype "+a+" = "+b+";\n";}
 	/ "class" __ name:var_name type_params:(_ "<" _ type_parameters _ ">" _ / "")  super_class:( _ "extends" _ var_name / "") _ "{" _ a4:class_statements _ "}" {
 		class_name = name;
 		let to_return = "";
 		let class_body = a4(name);
-		if(super_class.length > 0){
-			class_body = "usingnamespace "+super_class[3]+";"+a4(name);
-		}
-		if(type_params.length === 0){
-			to_return = "const "+name+" = struct{"+class_body+"};";
-		}
-		else{
-			to_return = "fn "+name+"("+type_params[3]+") type {return struct {"+class_body+"};}";
-		}
+		to_return = "type "+name+" = record("+class_body+");"
 		return to_return;
 	}
 
@@ -115,19 +107,7 @@ statement =
 statement_
     =
     class_
-    / "while" _ "(" _ a3:e _ ")" _ a5:bracket_statements {return ["while(",a3,"){",a5,"}"].join("");}
-    / "do" _ a2:bracket_statements _ "while" _ "(" _ a5:e _ ")" _ ";" {return ["do ",a2," while(",a5,");"].join("");}
     / "switch" _ "(" _ a3:e _ ")" _ "{" _ a6:case_statements _ "}" {return ["switch(",a3,"){",a6,"}"].join("");}
-    / "for" _ "(" _ a3:statement_with_semicolon _ ";" _ a5:e _ ";" _ a7:statement_with_semicolon _ ")" _ a9:bracket_statements {return "for("+a3+";"+a5+";"+a7+"){"+a9+"}";}
-    / "for" _ "(" _ ("let" / "var") _ item:var_name __ "of" __ the_arr:var_name _ ")" _ body:bracket_statements {
-		if(expression_types[item] !== undefined){
-			expression_types[the_arr] = expression_types[item]+"[]";
-		}
-		else if(expression_types[the_arr] !== undefined){
-			expression_types[item] = expression_types[the_arr].substring(0,expression_types[the_arr].length-2);
-		}
-		return "for("+the_arr+")|"+item+"|{"+body+"})";
-	}
     / "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements _ a6:elif {expression_types[a3] = "bool"; return ["if ",a3,"{",a5,"}",a6].join("");}
 	/ "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements {expression_types[a3] = "bool"; return ["if ",a3,"{",a5,"}"].join("");}
     / "function" __ name:var_name _ type_params:("<" _ type_parameters _ ">" _ / "") "(" _ b:function_parameters _ ")" _ t1:(":" _ type _ / "") "{" _ c:statements _ "}" {
@@ -137,7 +117,6 @@ statement_
 		}
 		return return_type+" "+name+"("+b+"){"+c+"}"
 	}
-
 
 type_parameters = head:type tail:(_ (',') _ type)* {
       return tail.reduce(function(result, element) {
