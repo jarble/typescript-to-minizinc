@@ -113,7 +113,7 @@ statement_
 		if(t1.length > 0){
 			return_type = t1[2]; 
 		}
-		return return_type+" "+name+"("+b+"){"+c+"}"
+		return "function " + return_type+" "+name+"("+b+") = "+c+";"
 	}
 
 identifiers = head:var_name tail:(_ (',') _ var_name)* {
