@@ -53,7 +53,7 @@ class_statements = head:class_statement tail:( _ class_statement)* {
       }, head);
     }
 
-instance_method = name:var_name _ type_params:("<" _ type_parameters _ ">" _ / "") "(" _ b:function_parameters _ ")" _ t2:(":" _ type _ / "") "{" _ c:statements _ "}" {
+instance_method = name:var_name _ "(" _ b:function_parameters _ ")" _ t2:(":" _ type _ / "") "{" _ c:statements _ "}" {
 		let t1 = "@TypeOf("+initial_value[returned]()+")";
 		if(t2.length > 0){
 			t1 = t2[2];
@@ -61,17 +61,12 @@ instance_method = name:var_name _ type_params:("<" _ type_parameters _ ">" _ / "
 		return function(name1){return "fn "+name+"(self:"+name1+",arguments:anytype) "+t1+"{"+b+c+"}";}
 	}
 
-static_method = "static" __ name:var_name _ type_params:("<" _ type_parameters _ ">" _ / "") "(" _ b:function_parameters _ ")" _ (":" _ t2:type _ / "") "{" _ c:statements _ "}" {
+static_method = "static" __ name:var_name _ "(" _ b:function_parameters _ ")" _ (":" _ t2:type _ / "") "{" _ c:statements _ "}" {
 		let t1 = "@TypeOf("+initial_value[returned]()+")";
 		if(t2.length > 0){
 			t1 = t2[2];
 		}
-		if(type_params.length > 0){
-			return function(name1){return "fn "+name+"("+type_params[2]+",arguments:anytype) "+t1+"{"+b+c+"}";};
-		}
-		else{
-			return function(name1){return "fn "+name+"(arguments:anytype) "+return_type+"{"+b+c+"}";}
-		}
+		return function(name1){return "fn "+name+"(arguments:anytype) "+return_type+"{"+b+c+"}";}
 	}
 
 constructor = "constructor" _ "(" _ params:function_parameters _ ")" _ "{" _ body:statements _ "}" {
@@ -89,7 +84,7 @@ access_modifier= "public" / "private"
 
 class_=
 	"type" __ a:var_name _ "=" _ b:type ";" {return "\ntype "+a+" = "+b+";\n";}
-	/ "class" __ name:var_name type_params:(_ "<" _ type_parameters _ ">" _ / "")  super_class:( _ "extends" _ var_name / "") _ "{" _ a4:class_statements _ "}" {
+	/ "class" __ name:var_name  super_class:( _ "extends" _ var_name / "") _ "{" _ a4:class_statements _ "}" {
 		class_name = name;
 		let to_return = "";
 		let class_body = a4(name);
@@ -108,7 +103,7 @@ statement_
     class_
     / "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements _ a6:elif {expression_types[a3] = "bool"; return ["if ",a3," then ",a5," ",a6].join("");}
 	/ "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements {expression_types[a3] = "bool"; return ["if ",a3," then ",a5].join("");}
-    / "function" __ name:var_name _ type_params:("<" _ type_parameters _ ">" _ / "") "(" _ b:function_parameters _ ")" _ t1:(":" _ type _ / "") "{" _ c:statements _ "}" {
+    / "function" __ name:var_name _ "(" _ b:function_parameters _ ")" _ t1:(":" _ type _ / "") "{" _ c:statements _ "}" {
 		let return_type = "@TypeOf("+initial_value[returned]()+")";
 		if(t1.length > 0){
 			return_type = t1[2]; 
@@ -131,11 +126,11 @@ statement_with_semicolon
 	}
 		
    / "return"  {return "return";}
-   / ("let" / "var") __ name:var_name _ ":" _ t1:type _ "=" _ val:e {
-		initial_value[name]=function(){return val;}; return t1+" " + name + " = "+val;
-   }
-   / "const" __ name:var_name _ ":" _ t1:type _ "=" _ val:e {
-		initial_value[name]=function(){return val;}; return "const " + " "+t1+" = "+val;
+   / ("const" / "var" / "let") __ name:var_name _ "=" _ val:e
+	
+	{ initial_value[name]=function(){return val;}; return "any:" + name + " = "+val; }
+   / ("let" / "var" / "const") __ name:var_name _ ":" _ t1:type _ "=" _ val:e {
+		initial_value[name]=function(){return val;}; return t1+":" + name + " = "+val;
    }
    / name:assignable _ a2:"=" _ val:e {
    		initial_value[name]=function(){return val;};
@@ -305,10 +300,10 @@ enum_members = head:enum_member tail:(_ (',') _ enum_member)* {
 callable=
 	"(" _ a2:e _ ")" {let to_return  ="("+a2+")"; expression_types[to_return] = expression_types[a2]; return to_return;}
 	/ "new" __ a:dot_expr "(" b:exprs ")" {return a+".init("+b+")"}
-    / "[" a2:array_exprs "]" {return type_in_arr+"[]{"+a2[1]+"}";}
+    / "[" a2:array_exprs "]" {return "["+a2[1]+"]";}
 	/ "{" _ a:object_members _ "}" {
 	
-	  return type_in_arr+"[]{"+a+"}"
+	  return "record("+a+")"
 	
 	
 	}
@@ -345,7 +340,7 @@ dot_expr = head:var_name tail:(_ ('.') _ var_name)* {
     }
 
 
-function_parameter = a1:var_name _ ":" _ t1:type {return [t1+" "+a1];} /
+function_parameter = a1:var_name _ ":" _ t1:type {return [t1+":"+a1];} /
 a1:var_name {return ["var "+a1];}
 
 function_parameters = head:function_parameter tail:(_ (',') _ function_parameter)* {
@@ -390,7 +385,7 @@ bracket_statements= "{" _ a2:statements _ "}" {return a2;} / a1:statement_with_s
 IDENTIFIER = [a-zA-Z_][a-zA-Z0-9_]* {return text();}
 STRING_LITERAL = '"' @$([^"\\] / "\\" .)* '"'
 
-NUMBER = a:Integer b:NUMBER_ {let to_return =  a+"."+b; initial_value[to_return] = function(){return to_return;}; return to_return;}
+NUMBER = a:Integer b:NUMBER_ {if(b == "") b = "0"; let to_return =  a+"."+b; initial_value[to_return] = function(){return to_return;}; return to_return;}
 NUMBER_ = "." a:Integer {return a;} / ("." / "") {return "";}
 
 Integer "integer"
