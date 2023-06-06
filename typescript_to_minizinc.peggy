@@ -95,7 +95,7 @@ class_=
 statement =
 	a1:statement_ {return a1;}
 	/ a1:statement_with_semicolon _ (";" / "") {
-		return a1+";"
+		return a1
 	}
 
 statement_
@@ -380,7 +380,7 @@ if(initial_value[to_return] === undefined){initial_value[to_return] = function()
 return to_return;
 }
 
-bracket_statements= "{" _ a2:statements _ "}" {return a2;} / a1:statement_with_semicolon _ ";" {return a1+";";}
+bracket_statements= "{" _ a2:statements _ "}" {return a2;} / a1:statement_with_semicolon _ ";" {return a1;}
 
 IDENTIFIER = [a-zA-Z_][a-zA-Z0-9_]* {return text();}
 STRING_LITERAL = '"' @$([^"\\] / "\\" .)* '"'
