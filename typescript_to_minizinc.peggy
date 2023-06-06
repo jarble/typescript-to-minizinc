@@ -106,8 +106,8 @@ statement =
 statement_
     =
     class_
-    / "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements _ a6:elif {expression_types[a3] = "bool"; return ["if ",a3,"{",a5,"}",a6].join("");}
-	/ "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements {expression_types[a3] = "bool"; return ["if ",a3,"{",a5,"}"].join("");}
+    / "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements _ a6:elif {expression_types[a3] = "bool"; return ["if ",a3," then ",a5," ",a6].join("");}
+	/ "if" _ "(" _ a3:e _ ")" _ a5:bracket_statements {expression_types[a3] = "bool"; return ["if ",a3," then ",a5].join("");}
     / "function" __ name:var_name _ type_params:("<" _ type_parameters _ ">" _ / "") "(" _ b:function_parameters _ ")" _ t1:(":" _ type _ / "") "{" _ c:statements _ "}" {
 		let return_type = "@TypeOf("+initial_value[returned]()+")";
 		if(t1.length > 0){
@@ -127,7 +127,7 @@ statement_with_semicolon
    "return" __ a2:e  {
 		returned = a2;
 		//alert(returned);
-		return "return "+a2;
+		return a2;
 	}
 		
    / "return"  {return "return";}
