@@ -304,7 +304,7 @@ callable=
     / "[" a2:array_exprs "]" {return "["+a2[1]+"]";}
 	/ "{" _ a:object_members _ "}" {
 	
-	  return "record("+a+")"
+	  return "("+a+")"
 	
 	
 	}
