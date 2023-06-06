@@ -84,6 +84,7 @@ access_modifier= "public" / "private"
 
 class_=
 	"type" __ a:var_name _ "=" _ b:type ";" {return "\ntype "+a+" = "+b+";\n";}
+	/ "enum" __ a:var_name __ "{" __ m:enum_members __ "}" {return "enum "+a+" = {"+m+"}";}
 	/ "class" __ name:var_name  super_class:( _ "extends" _ var_name / "") _ "{" _ a4:class_statements _ "}" {
 		class_name = name;
 		let to_return = "";
@@ -277,7 +278,7 @@ function_call_ = "(" _ a2:exprs _ ")" {return "("+a2+")";}
 
 not_expr= a1:"!" _ a2:access_array {let to_return = "!"+a2; expression_types[a2] = "bool"; expression_types[to_return] = "bool"; return to_return;} / access_array
 
-object_member = a1:var_name _ ":" _ e1:e {return "."+a1+"="+e1;}
+object_member = a1:var_name _ ":" _ e1:e {return a1+":"+e1;}
 
 object_members = head:object_member tail:(_ (',') _ object_member)* {
       return tail.reduce(function(result, element) {
@@ -291,7 +292,7 @@ enum_member = a1:var_name e1:(_ "=" _ e1:e / "") {
 	else return a1;
 }
 
-enum_members = head:enum_member tail:(_ (',') _ enum_member)* {
+enum_members = head:enum_member tail:(_ (',') _ enum_member)* ","* {
       return tail.reduce(function(result, element) {
         return result+","+element[3];
       }, head);
