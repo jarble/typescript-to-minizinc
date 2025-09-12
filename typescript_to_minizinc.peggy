@@ -47,7 +47,7 @@ Start
 
 /* ---------------- Top-level items ---------------- */
 TopLevelItem
-  = item:(TypeAliasDecl / EnumDecl / FunctionDecl / FunctionDeclOnly / ConstDecl / TopLevelVarDecl / AssignmentStmt / ExprStmt) { return item; }
+  = item:(TypeAliasDecl / EnumDecl / FunctionDecl / FunctionDeclOnly / VarDecl / AssignmentStmt / ExprStmt) { return item; }
 
 /* ---------------- Type aliases and enums ---------------- */
 TypeAliasDecl
@@ -63,31 +63,19 @@ EnumDecl
 EnumMemberList = head:EnumMember tail:(_ "," _ EnumMember)* _ ","? { return [head].concat(tail.map(t=>t[3])); }
 EnumMember = name:Identifier { return {name}; }
 
-/* ---------------- Consts & top-level vars ---------------- */
-ConstDecl
-  = _ "const" __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return "constraint " + id + " = " + expr + ";\n"; }
-  / _ "const" __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "constraint " + id + " = " + expr + ";\n"; }
-
-TopLevelVarDecl
-  = _ ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
-  / _ ("var"/"let") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
+/* ---------------- Unified var/let/const ---------------- */
+VarDecl
+  = _ ("var"/"let"/"const") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
+  / _ ("var"/"let"/"const") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
 
 /* ---------------- Statements ---------------- */
 Statement
-  = ConstStmt
-  / VarDecl
+  = VarDecl
   / AssignmentStmt
   / ReturnStmt
   / IfStmt
   / ExprStmt
   / Block
-
-ConstStmt
-  = _ "const" __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
-
-VarDecl
-  = _ ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
-  / _ ("var"/"let") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
 
 AssignmentStmt
   = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return "constraint " + lhs + " = " + rhs + ";\n"; }
@@ -132,14 +120,43 @@ Block
     }
 
 /* ---------------- Expressions ---------------- */
-Expression = LogicalOr
-LogicalOr = left:LogicalAnd tail:(_ "||" _ LogicalAnd)* { return tail.reduce((acc,t)=>acc + " \\/ " + t[3], left); }
-LogicalAnd = left:Comparison tail:(_ "&&" _ Comparison)* { return tail.reduce((acc,t)=>acc + " /\\ " + t[3], left); }
-Comparison = left:AddSub tail:(_ CompOp _ AddSub)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
+Expression = Ternary
+
+Ternary
+  = cond:LogicalOr _ "?" _ thenExpr:Expression _ ":" _ elseExpr:Expression {
+      return "(if " + cond + " then " + thenExpr + " else " + elseExpr + " endif)";
+    }
+  / LogicalOr
+
+LogicalOr = left:LogicalAnd tail:(_ "||" _ LogicalAnd)* {
+  return tail.reduce((acc,t)=>acc + " \\/ " + t[3], left);
+}
+
+LogicalAnd = left:Comparison tail:(_ "&&" _ Comparison)* {
+  return tail.reduce((acc,t)=>acc + " /\\ " + t[3], left);
+}
+
+Comparison = left:AddSub tail:(_ CompOp _ AddSub)* {
+  return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left);
+}
 CompOp = "==" / "!=" / "<=" / ">=" / "<" / ">"
 
-AddSub = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
-MulDiv = left:Unary tail:(_ ("*" / "/") _ Unary)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
+AddSub = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* {
+  return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left);
+}
+
+MulDiv = left:Exponent tail:(_ ("*" / "/" / "%") _ Exponent)* {
+  return tail.reduce((acc,t)=>{
+    if(t[1] === "%") return acc + " mod " + t[3];
+    return acc + " " + t[1] + " " + t[3];
+  }, left);
+}
+
+Exponent
+  = left:Unary tail:(_ "**" _ Exponent)? {
+      if(tail) return "pow(" + left + ", " + tail[3] + ")";
+      return left;
+    }
 
 Unary
   = "-" _ v:Unary { return "-" + v; }
@@ -184,7 +201,6 @@ Number = n:$([0-9]+ ("." [0-9]+)?) { return formatNumber(text()); }
 Boolean = b:("true" / "false") { return b; }
 Identifier = id:$([a-zA-Z_$][a-zA-Z0-9_$]*) { return id; }
 
-/* Expression statement */
 ExprStmt = _ expr:Expression _ ";" _ { return expr + ";\n"; }
 
 /* ---------------- Types ---------------- */
