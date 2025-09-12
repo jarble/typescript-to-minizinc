@@ -1,5 +1,4 @@
 {
-  // --- Helpers for MiniZinc output generation ---
   const typeMap = { number: "float", boolean: "bool", string: "string" };
 
   function mapType(tsType){
@@ -11,79 +10,67 @@
     return typeMap[tsType] || tsType;
   }
 
-  function compileIdent(id){ return id; }
-
-  function emitComment(c){
-    if(c.startsWith("//")) return "% " + c.slice(2).trim();
-    const inner = c.slice(2,-2).replace(/\r\n/g,"\n").replace(/\n/g,"\n% ");
-    return "% " + inner.trim();
-  }
-
   function formatNumber(n){ return n.indexOf(".") >= 0 ? n : n + ".0"; }
 
-  function addInnerSemicolon(s){
-    if(!s) return "";
-    const t = s.trim();
-    if(!t) return "";
-    if(t.startsWith("%")) return t;
-    if(t.indexOf("\n") !== -1) return t;
-    if(t.startsWith("if ") || t.startsWith("let ")) return t;
-    return t + ";";
+  const jsFuncMap = {
+    "abs":"abs","acos":"acos","asin":"asin","atan":"atan","atan2":"atan2","ceil":"ceil",
+    "cos":"cos","exp":"exp","floor":"floor","log":"log","max":"max","min":"min","pow":"pow",
+    "sin":"sin","sqrt":"sqrt","tan":"tan","sign":"sign","round":"round","trunc":"trunc","hypot":"hypot"
+  };
+
+  const jsConstMap = {
+    "Math.PI": "3.141592653589793",
+    "Math.E": "2.718281828459045",
+    "Math.LN2": "0.6931471805599453",
+    "Math.LN10": "2.302585092994046",
+    "Math.LOG2E": "1.4426950408889634",
+    "Math.LOG10E": "0.4342944819032518",
+    "Math.SQRT2": "1.4142135623730951",
+    "Math.SQRT1_2": "0.7071067811865476"
+  };
+
+  function translateBuiltin(callee, args){
+    if(typeof callee !== "string") callee = String(callee);
+    if(jsConstMap[callee] && (!args || args.length === 0)) return jsConstMap[callee];
+    if(callee.startsWith("Math.")){
+      const name = callee.slice(5);
+      if(jsFuncMap[name]) return jsFuncMap[name] + "(" + (args ? args.join(", ") : "") + ")";
+      return name + "(" + (args ? args.join(", ") : "") + ")";
+    }
+    return callee + "(" + (args ? args.join(", ") : "") + ")";
   }
 }
 
-/* ---------------- Entry point ---------------- */
+/* ---------------- Entry ---------------- */
 Start
-  = _ items:(TopLevelItem (_ TopLevelItem)*)? _ {
-      const all = items ? [items[0]].concat(items[1].map(t=>t[1])) : [];
-      return all.map(s => addInnerSemicolon(s)).join("\n");
-    }
+  = items:TopLevelItem* { return items.join(""); }
 
 /* ---------------- Top-level items ---------------- */
 TopLevelItem
-  = TypeAliasDecl
-  / EnumDecl
-  / FunctionDecl
-  / FunctionDeclOnly
-  / ConstDecl
-  / TopLevelVarDecl
-  / AssignmentStmt
-  / ExprStmt
-  / ForStmt
+  = item:(TypeAliasDecl / EnumDecl / FunctionDecl / FunctionDeclOnly / ConstDecl / TopLevelVarDecl / AssignmentStmt / ExprStmt) { return item; }
 
-/* ---------------- Type alias and enums ---------------- */
+/* ---------------- Type aliases and enums ---------------- */
 TypeAliasDecl
-  = "type" __ id:Identifier _ "=" _ t:Type _ ";" {
-      return "type " + compileIdent(id) + " = " + mapType(t);
-    }
+  = _ "type" __ id:Identifier _ "=" _ t:Type _ ";" _ { return "type " + id + " = " + mapType(t) + ";\n"; }
 
 EnumDecl
-  = "enum" __ id:Identifier _ "{" _ members:EnumMemberList? _ "}" {
+  = _ "enum" __ id:Identifier _ "{" _ members:EnumMemberList? _ "}" _ {
       const mems = members || [];
       const list = mems.map(m=>m.name).join(", ");
-      return "enum " + compileIdent(id) + " = { " + list + " }";
+      return "enum " + id + " = { " + list + " };\n";
     }
 
 EnumMemberList = head:EnumMember tail:(_ "," _ EnumMember)* _ ","? { return [head].concat(tail.map(t=>t[3])); }
 EnumMember = name:Identifier { return {name}; }
 
-/* ---------------- Consts & vars ---------------- */
+/* ---------------- Consts & top-level vars ---------------- */
 ConstDecl
-  = "const" __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" {
-      return "constraint " + compileIdent(id) + " = " + expr;
-    }
-  / "const" __ id:Identifier _ "=" _ expr:Expression _ ";" {
-      return "constraint " + expr;
-    }
+  = _ "const" __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return "constraint " + id + " = " + expr + ";\n"; }
+  / _ "const" __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "constraint " + id + " = " + expr + ";\n"; }
 
-/* Top-level var declarations with default "any" type */
 TopLevelVarDecl
-  = ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" {
-      return "var " + mapType(t) + ": " + compileIdent(id) + " = " + expr;
-    }
-  / ("var"/"let") __ id:Identifier _ "=" _ expr:Expression _ ";" {
-      return "var any: " + compileIdent(id) + " = " + expr;
-    }
+  = _ ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
+  / _ ("var"/"let") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
 
 /* ---------------- Statements ---------------- */
 Statement
@@ -94,99 +81,66 @@ Statement
   / IfStmt
   / ExprStmt
   / Block
-  / ForStmt
 
 ConstStmt
-  = "const" __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" {
-      return mapType(t) + ": " + compileIdent(id) + " = " + expr;
-    }
+  = _ "const" __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
 
 VarDecl
-  = ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" {
-      return "var " + mapType(t) + ": " + compileIdent(id) + " = " + expr;
-    }
-  / ("var"/"let") __ id:Identifier _ "=" _ expr:Expression _ ";" {
-      return "var any: " + compileIdent(id) + " = " + expr;
-    }
-
-VarDeclNoSemi
-  = ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression {
-      return "var " + mapType(t) + ": " + compileIdent(id) + " = " + expr;
-    }
-  / ("var"/"let") __ id:Identifier _ "=" _ expr:Expression {
-      return "var any: " + compileIdent(id) + " = " + expr;
-    }
+  = _ ("var"/"let") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
+  / _ ("var"/"let") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
 
 AssignmentStmt
-  = lhs:Assignable _ "=" _ rhs:Expression _ ";" { return "constraint " + lhs + " = " + rhs; }
-AssignmentNoSemi
-  = lhs:Assignable _ "=" _ rhs:Expression { return "constraint " + lhs + " = " + rhs; }
+  = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return "constraint " + lhs + " = " + rhs + ";\n"; }
 
-ReturnStmt = "return" __ expr:Expression _ ";" { return expr; }
+ReturnStmt
+  = _ "return" __ expr:Expression _ ";" _ { return expr + ";\n"; }
 
 /* ---------------- If / Else ---------------- */
 IfStmt
-  = "if" _ "(" _ cond:Expression _ ")" _ then:Block _ elsePart:ElseClause? {
-      return "if " + cond + " then\n" + then + (elsePart ? ("\nelse\n" + elsePart) : "") + "\nendif";
+  = _ "if" _ "(" _ cond:Expression _ ")" _ then:Block _ elsePart:ElseClause? {
+      return "if " + cond + " then\n" + then + (elsePart ? ("else\n" + elsePart) : "") + "\nendif;\n";
     }
-ElseClause = "else" _ stmt:(IfStmt / Block) { return stmt; }
 
-/* ---------------- For loops (placeholder) ---------------- */
-ForStmt
-  = "for" _ "(" _ init:(VarDeclNoSemi / AssignmentNoSemi / Expression)? _ ";" _ cond:Expression? _ ";" _ update:(AssignmentNoSemi / Expression)? _ ")" _ body:Block {
-      const prefix = "% for (" + (init?init:"") + "; " + (cond?cond:"") + "; " + (update?update:"") + ") { ... }";
-      return prefix + "\n" + body;
-    }
+ElseClause = _ "else" _ stmt:(IfStmt / Block) { return stmt; }
 
 /* ---------------- Functions ---------------- */
 FunctionDecl
-  = "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ _ body:Block {
+  = _ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ body:Block _ {
       const ps = params ? params.join(", ") : "";
-      return "function " + mapType(ret) + ": " + compileIdent(id) + "(" + ps + ") = " + body;
+      return "function " + mapType(ret) + ": " + id + "(" + ps + ") = " + body + ";\n";
     }
 
 FunctionDeclOnly
-  = "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ ";" {
+  = _ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ ";" _ {
       const ps = params ? params.join(", ") : "";
-      return "% function prototype: " + mapType(ret) + " " + compileIdent(id) + "(" + ps + ")";
+      return "% function prototype: " + mapType(ret) + " " + id + "(" + ps + ");\n";
     }
 
 ParamList = head:Param tail:(_ "," _ Param)* { return [head].concat(tail.map(t=>t[3])); }
-Param = id:Identifier _ ":" _ t:Type { return mapType(t) + ": " + compileIdent(id); }
+Param = id:Identifier _ ":" _ t:Type { return mapType(t) + ": " + id; }
 
 /* ---------------- Blocks ---------------- */
 Block
-  = "{" _ stmts:(Statement (_ Statement)*)? _ "}" {
-      const all = stmts ? [stmts[0]].concat(stmts[1].map(t=>t[1])) : [];
-      if(all.length === 0) return "true";
-      let expr = all[all.length - 1];
-      for(let i = all.length - 2; i >= 0; i--){
-        const inner = addInnerSemicolon(all[i]);
-        expr = "let {\n" + inner + "\n} in " + expr;
+  = "{" _ stmts:Statement* _ "}" {
+      if(stmts.length === 0) return "true";
+      if(stmts.length === 1) return stmts[0];
+      let expr = stmts[stmts.length - 1];
+      for(let i = stmts.length - 2; i >= 0; i--){
+        expr = "let {\n" + stmts[i] + "} in " + expr;
       }
       return expr;
     }
 
 /* ---------------- Expressions ---------------- */
 Expression = LogicalOr
-
-LogicalOr
-  = left:LogicalAnd tail:(_ "||" _ LogicalAnd)* { return tail.reduce((acc,t)=>acc + " \\/ " + t[3], left); }
-
-LogicalAnd
-  = left:Comparison tail:(_ "&&" _ Comparison)* { return tail.reduce((acc,t)=>acc + " /\\ " + t[3], left); }
-
-Comparison
-  = left:AddSub tail:(_ CompOp _ AddSub)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
+LogicalOr = left:LogicalAnd tail:(_ "||" _ LogicalAnd)* { return tail.reduce((acc,t)=>acc + " \\/ " + t[3], left); }
+LogicalAnd = left:Comparison tail:(_ "&&" _ Comparison)* { return tail.reduce((acc,t)=>acc + " /\\ " + t[3], left); }
+Comparison = left:AddSub tail:(_ CompOp _ AddSub)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
 CompOp = "==" / "!=" / "<=" / ">=" / "<" / ">"
 
-AddSub
-  = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
+AddSub = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
+MulDiv = left:Unary tail:(_ ("*" / "/") _ Unary)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
 
-MulDiv
-  = left:Unary tail:(_ ("*" / "/") _ Unary)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
-
-/* Unary then Postfix */
 Unary
   = "-" _ v:Unary { return "-" + v; }
   / "!" _ v:Unary { return "not " + v; }
@@ -196,9 +150,11 @@ Postfix
   = base:Primary tail:PostfixPart* { return tail.reduce((acc, part) => part(acc), base); }
 
 PostfixPart
-  = "(" _ args:ArgList? _ ")" { return function(c){ const a = args ? args.join(", ") : ""; return c + "(" + a + ")"; }; }
+  = "(" _ args:ArgList? _ ")" { return function(callee){ return translateBuiltin(callee,args||[]); } }
   / "[" _ idx:Expression _ "]" { return function(a){ return a + "[" + idx + "]"; }; }
   / "." name:Identifier { return function(o){ return o + "." + name; }; }
+
+ArgList = head:Expression tail:(_ "," _ Expression)* { return [head].concat(tail.map(t=>t[3])); }
 
 /* ---------------- Primary ---------------- */
 Primary
@@ -206,7 +162,6 @@ Primary
   / Boolean
   / ArrayLiteral
   / ObjectLiteral
-  / StructConstructor
   / Identifier
   / "(" _ e:Expression _ ")" { return "(" + e + ")"; }
 
@@ -214,29 +169,14 @@ Primary
 ObjectLiteral
   = "{" _ fields:FieldList? _ "}" { const fs = fields ? fields.join(", ") : ""; return "(" + fs + ")"; }
 FieldList = head:Field tail:(_ "," _ Field)* { return [head].concat(tail.map(t=>t[3])); }
-Field = key:Identifier _ ":" _ value:Expression { return compileIdent(key) + ": " + value; }
+Field = key:Identifier _ ":" _ value:Expression { return key + ": " + value; }
 
 /* ---------------- Arrays ---------------- */
 ArrayLiteral = "[" _ elems:ExprList? _ "]" { const arr = elems ? elems : []; return "[" + arr.join(", ") + "]"; }
 ExprList = head:Expression tail:(_ "," _ Expression)* { return [head].concat(tail.map(t=>t[3])); }
 
-/* ---------------- Struct / Function calls ---------------- */
-StructConstructor = id:Identifier "(" _ args:ArgList? _ ")" { const a = args ? args.join(", ") : ""; return compileIdent(id) + "(" + a + ")"; }
-FuncCall = id:Identifier "(" _ args:ArgList? _ ")" { const a = args ? args.join(", ") : ""; return id + "(" + a + ")"; }
-ArgList = head:Expression tail:(_ "," _ Expression)* { return [head].concat(tail.map(t=>t[3])); }
-
 /* ---------------- Assignable ---------------- */
-Assignable
-  = base:IdentifierOrCall tail:(_ AccessPart)* { return tail.reduce((acc,t)=>{ const p=t[1]; return p.type==="member"?acc+"."+p.name:acc+"["+p.index+"]"; }, base); }
-
-IdentifierOrCall
-  = StructConstructor
-  / FuncCall
-  / Identifier
-
-AccessPart
-  = "." name:Identifier { return {type:"member", name}; }
-  / "[" _ idx:Expression _ "]" { return {type:"index", index:idx}; }
+Assignable = Postfix
 
 /* ---------------- Tokens ---------------- */
 StringLiteral = s:$("\"" ([^\"]*) "\"") { return s; }
@@ -244,21 +184,18 @@ Number = n:$([0-9]+ ("." [0-9]+)?) { return formatNumber(text()); }
 Boolean = b:("true" / "false") { return b; }
 Identifier = id:$([a-zA-Z_$][a-zA-Z0-9_$]*) { return id; }
 
-/* Expression statement (top-level) */
-ExprStmt = expr:Expression _ ";" { return expr; }
+/* Expression statement */
+ExprStmt = _ expr:Expression _ ";" _ { return expr + ";\n"; }
 
 /* ---------------- Types ---------------- */
 Type = base:BaseType arr:("[]")* { return base + arr.join(""); }
 BaseType = "number" / "boolean" / "string" / Identifier
 
-/* ---------------- Whitespace including comments ---------------- */
-_ 
-  = ws:([ \t\r\n] / Comment)* { 
-      return ws.map(c => typeof c === "string" ? c : emitComment(c)).join(""); 
-  }
+/* ---------------- Whitespace & comments ---------------- */
+_ = ws:([ \t\r\n]+ / Comment)* { return ws.map(c=>c).join(""); }
 __ = [ \t\r\n]+
 
 Comment
   = SingleLineComment / MultiLineComment
-SingleLineComment = c:$("//" [^\r\n]*) { return c; }
-MultiLineComment = c:$("/*" (!"*/" .)* "*/") { return c; }
+SingleLineComment = c:$("//" [^\r\n]*) { return c + "\n"; }
+MultiLineComment = c:$("/*" (!"*/" .)* "*/") { return c + "\n"; }
