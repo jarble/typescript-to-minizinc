@@ -20,13 +20,13 @@
 
   const jsConstMap = {
     "Math.PI": "3.141592653589793",
-    "Math.E": "2.718281828459045",
-    "Math.LN2": "0.6931471805599453",
-    "Math.LN10": "2.302585092994046",
-    "Math.LOG2E": "1.4426950408889634",
-    "Math.LOG10E": "0.4342944819032518",
-    "Math.SQRT2": "1.4142135623730951",
-    "Math.SQRT1_2": "0.7071067811865476"
+    "Math.E": "(exp(1.0))",
+    "Math.LN2": "(log(2.0))",
+    "Math.LN10": "(log(10.0))",
+    "Math.LOG2E": "(1.0 / log(2.0))",
+    "Math.LOG10E": "(1.0 / log(10.0))",
+    "Math.SQRT2": "(sqrt(2.0))",
+    "Math.SQRT1_2": "(1.0 / sqrt(2.0))"
   };
 
   function translateBuiltin(callee, args){
@@ -43,11 +43,11 @@
 
 /* ---------------- Entry ---------------- */
 Start
-  = items:TopLevelItem* { return items.join(""); }
+  = items:TopLevelItem* _ { return items.join(""); }
 
 /* ---------------- Top-level items ---------------- */
 TopLevelItem
-  = item:(TypeAliasDecl / EnumDecl / FunctionDecl / FunctionDeclOnly / VarDecl / AssignmentStmt / ExprStmt) { return item; }
+  = item:(TypeAliasDecl / EnumDecl / ClassDecl / FunctionDecl / FunctionDeclOnly / TopLevelVarDecl / TopLevelAssignmentStmt / TopLevelIfStmt / ExprStmt) { return item; }
 
 /* ---------------- Type aliases and enums ---------------- */
 TypeAliasDecl
@@ -63,37 +63,77 @@ EnumDecl
 EnumMemberList = head:EnumMember tail:(_ "," _ EnumMember)* _ ","? { return [head].concat(tail.map(t=>t[3])); }
 EnumMember = name:Identifier { return {name}; }
 
-/* ---------------- Unified var/let/const ---------------- */
-VarDecl
+/* ---------------- Classes (fields only) ---------------- */
+ClassDecl
+  = _ "class" __ id:Identifier _ "{" _ members:VarDeclMember* _ "}" _ {
+      const fields = members
+        .map(m => mapType(m.type) + ": " + m.name)
+        .join(", ");
+      return "record " + id + " = { " + fields + " };\n";
+    }
+
+VarDeclMember
+  = _ (("var"/"let"/"const") __)? id:Identifier _ ":" _ t:Type _ ";" _ { return { name: id, type: t }; }
+
+/* ---------------- Top-level vars/assignments ---------------- */
+TopLevelVarDecl
   = _ ("var"/"let"/"const") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
   / _ ("var"/"let"/"const") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
 
-/* ---------------- Statements ---------------- */
+TopLevelAssignmentStmt
+  = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return "constraint " + lhs + " = " + rhs + ";\n"; }
+
+/* ---------------- Top-level if / else if / else ---------------- */
+TopLevelIfStmt
+  = _ "if" _ "(" _ cond:Expression _ ")" _ then:InnerBlock _ elseifClauses:TopLevelElseIfClause* _ elsePart:TopLevelElseClause? {
+      let code = "constraint if " + cond + " then\n" + then;
+      for (let e of elseifClauses) code += "\nelse if " + e.cond + " then\n" + e.block;
+      if (elsePart) code += "\nelse\n" + elsePart;
+      code += "\nendif;\n";
+      return code;
+    }
+
+TopLevelElseIfClause
+  = _ "else" _ "if" _ "(" _ cond:Expression _ ")" _ block:InnerBlock { return {cond, block}; }
+
+TopLevelElseClause
+  = _ "else" _ block:InnerBlock { return block; }
+
+/* ---------------- Inner statements and blocks ---------------- */
 Statement
-  = VarDecl
-  / AssignmentStmt
+  = InnerVarDecl
+  / InnerAssignment
   / ReturnStmt
   / IfStmt
   / ExprStmt
-  / Block
 
-AssignmentStmt
-  = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return "constraint " + lhs + " = " + rhs + ";\n"; }
+InnerVarDecl
+  = _ ("var"/"let"/"const") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr; }
+  / _ ("var"/"let"/"const") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr; }
+
+InnerAssignment
+  = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return lhs + " = " + rhs; }
 
 ReturnStmt
-  = _ "return" __ expr:Expression _ ";" _ { return expr + ";\n"; }
+  = _ "return" __ expr:Expression _ ";" _ { return expr; }
 
-/* ---------------- If / Else ---------------- */
+ExprStmt
+  = _ expr:Expression _ ";" _ { return expr; }
+
 IfStmt
-  = _ "if" _ "(" _ cond:Expression _ ")" _ then:Block _ elsePart:ElseClause? {
-      return "if " + cond + " then\n" + then + (elsePart ? ("else\n" + elsePart) : "") + "\nendif;\n";
+  = _ "if" _ "(" _ cond:Expression _ ")" _ then:InnerBlock _ elsePart:ElseClause? {
+      return "if " + cond + " then\n" + then + (elsePart ? ("else\n" + elsePart) : "") + "\nendif";
     }
 
-ElseClause = _ "else" _ stmt:(IfStmt / Block) { return stmt; }
+ElseClause
+  = _ "else" _ stmt:(IfStmt / InnerBlock) { return stmt; }
+
+InnerBlock
+  = "{" _ stmts:Statement* _ "}" { return stmts.join("\n"); }
 
 /* ---------------- Functions ---------------- */
 FunctionDecl
-  = _ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ body:Block _ {
+  = _ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ body:InnerBlock _ {
       const ps = params ? params.join(", ") : "";
       return "function " + mapType(ret) + ": " + id + "(" + ps + ") = " + body + ";\n";
     }
@@ -107,18 +147,6 @@ FunctionDeclOnly
 ParamList = head:Param tail:(_ "," _ Param)* { return [head].concat(tail.map(t=>t[3])); }
 Param = id:Identifier _ ":" _ t:Type { return mapType(t) + ": " + id; }
 
-/* ---------------- Blocks ---------------- */
-Block
-  = "{" _ stmts:Statement* _ "}" {
-      if(stmts.length === 0) return "true";
-      if(stmts.length === 1) return stmts[0];
-      let expr = stmts[stmts.length - 1];
-      for(let i = stmts.length - 2; i >= 0; i--){
-        expr = "let {\n" + stmts[i] + "} in " + expr;
-      }
-      return expr;
-    }
-
 /* ---------------- Expressions ---------------- */
 Expression = Ternary
 
@@ -128,35 +156,14 @@ Ternary
     }
   / LogicalOr
 
-LogicalOr = left:LogicalAnd tail:(_ "||" _ LogicalAnd)* {
-  return tail.reduce((acc,t)=>acc + " \\/ " + t[3], left);
-}
-
-LogicalAnd = left:Comparison tail:(_ "&&" _ Comparison)* {
-  return tail.reduce((acc,t)=>acc + " /\\ " + t[3], left);
-}
-
-Comparison = left:AddSub tail:(_ CompOp _ AddSub)* {
-  return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left);
-}
+LogicalOr = left:LogicalAnd tail:(_ "||" _ LogicalAnd)* { return tail.reduce((acc,t)=>acc + " \\/ " + t[3], left); }
+LogicalAnd = left:Comparison tail:(_ "&&" _ Comparison)* { return tail.reduce((acc,t)=>acc + " /\\ " + t[3], left); }
+Comparison = left:AddSub tail:(_ CompOp _ AddSub)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
 CompOp = "==" / "!=" / "<=" / ">=" / "<" / ">"
 
-AddSub = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* {
-  return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left);
-}
-
-MulDiv = left:Exponent tail:(_ ("*" / "/" / "%") _ Exponent)* {
-  return tail.reduce((acc,t)=>{
-    if(t[1] === "%") return acc + " mod " + t[3];
-    return acc + " " + t[1] + " " + t[3];
-  }, left);
-}
-
-Exponent
-  = left:Unary tail:(_ "**" _ Exponent)? {
-      if(tail) return "pow(" + left + ", " + tail[3] + ")";
-      return left;
-    }
+AddSub = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
+MulDiv = left:Exponent tail:(_ ("*" / "/" / "%") _ Exponent)* { return tail.reduce((acc,t)=>t[1]==="%"?acc+" mod "+t[3]:acc+" "+t[1]+" "+t[3], left); }
+Exponent = left:Unary tail:(_ "**" _ Unary)* { return tail.reduce((acc,t)=> "pow(" + acc + ", " + t[3] + ")", left); }
 
 Unary
   = "-" _ v:Unary { return "-" + v; }
@@ -177,10 +184,16 @@ ArgList = head:Expression tail:(_ "," _ Expression)* { return [head].concat(tail
 Primary
   = Number
   / Boolean
+  / StringLiteral
   / ArrayLiteral
   / ObjectLiteral
+  / NewExpr
   / Identifier
   / "(" _ e:Expression _ ")" { return "(" + e + ")"; }
+
+/* ---------------- New expression ---------------- */
+NewExpr
+  = "new" __ id:Identifier _ "(" _ args:ArgList? _ ")" { return "new " + id + "(" + (args ? args.join(", ") : "") + ")"; }
 
 /* ---------------- Object literals ---------------- */
 ObjectLiteral
@@ -200,8 +213,6 @@ StringLiteral = s:$("\"" ([^\"]*) "\"") { return s; }
 Number = n:$([0-9]+ ("." [0-9]+)?) { return formatNumber(text()); }
 Boolean = b:("true" / "false") { return b; }
 Identifier = id:$([a-zA-Z_$][a-zA-Z0-9_$]*) { return id; }
-
-ExprStmt = _ expr:Expression _ ";" _ { return expr + ";\n"; }
 
 /* ---------------- Types ---------------- */
 Type = base:BaseType arr:("[]")* { return base + arr.join(""); }
