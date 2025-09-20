@@ -43,61 +43,81 @@
 
 /* ---------------- Entry ---------------- */
 Start
-  = items:TopLevelItem* _ { return items.join(""); }
+  = pre:_ items:(TopLevelItem _)* post:_ { 
+      return pre + items.map(i => i[0]).join("") + post; 
+    }
 
 /* ---------------- Top-level items ---------------- */
 TopLevelItem
-  = item:(TypeAliasDecl / EnumDecl / ClassDecl / FunctionDecl / FunctionDeclOnly / TopLevelVarDecl / TopLevelAssignmentStmt / TopLevelIfStmt / ExprStmt) { return item; }
+  = TypeAliasDecl
+  / EnumDecl
+  / ClassDecl
+  / FunctionDecl
+  / FunctionDeclOnly
+  / TopLevelVarDecl
+  / TopLevelAssignmentStmt
+  / TopLevelIfStmt
+  / ExprStmt
 
 /* ---------------- Type aliases and enums ---------------- */
 TypeAliasDecl
-  = _ "type" __ id:Identifier _ "=" _ t:Type _ ";" _ { return "type " + id + " = " + mapType(t) + ";\n"; }
-
-EnumDecl
-  = _ "enum" __ id:Identifier _ "{" _ members:EnumMemberList? _ "}" _ {
-      const mems = members || [];
-      const list = mems.map(m=>m.name).join(", ");
-      return "enum " + id + " = { " + list + " };\n";
+  = pre:_ "type" ws:__ id:Identifier _ "=" _ t:Type post:_ ";" { 
+      return pre + "type" + ws + id + " = " + mapType(t) + ";" + post; 
     }
 
-EnumMemberList = head:EnumMember tail:(_ "," _ EnumMember)* _ ","? { return [head].concat(tail.map(t=>t[3])); }
+EnumDecl
+  = pre:_ "enum" ws:__ id:Identifier _ "{" _ members:EnumMemberList? _ "}" post:_ { 
+      const mems = members || [];
+      const list = mems.map(m=>m.name).join(", ");
+      return pre + "enum" + ws + id + " = { " + list + " };" + post;
+    }
+
+EnumMemberList = head:EnumMember tail:(_ "," _ EnumMember)* _ ","? { 
+    return [head].concat(tail.map(t=>t[3])); 
+}
 EnumMember = name:Identifier { return {name}; }
 
 /* ---------------- Classes (fields only) ---------------- */
 ClassDecl
-  = _ "class" __ id:Identifier _ "{" _ members:VarDeclMember* _ "}" _ {
-      const fields = members
-        .map(m => mapType(m.type) + ": " + m.name)
-        .join(", ");
-      return "record " + id + " = { " + fields + " };\n";
+  = pre:_ "class" ws:__ id:Identifier _ "{" _ members:VarDeclMember* _ "}" post:_ {
+      const fields = members.map(m => mapType(m.type) + ": " + m.name).join(", ");
+      return pre + "record" + ws + id + " = { " + fields + " };" + post;
     }
 
 VarDeclMember
-  = _ (("var"/"let"/"const") __)? id:Identifier _ ":" _ t:Type _ ";" _ { return { name: id, type: t }; }
+  = _ (("var"/"let"/"const") __)? id:Identifier _ ":" _ t:Type _ ";" _ { 
+      return { name: id, type: t }; 
+    }
 
 /* ---------------- Top-level vars/assignments ---------------- */
 TopLevelVarDecl
-  = _ ("var"/"let"/"const") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr + ";\n"; }
-  / _ ("var"/"let"/"const") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr + ";\n"; }
+  = pre:_ kw:("var"/"let"/"const") __ id:Identifier pre2:_ ":" _ t:Type _ "=" _ expr:Expression post:_ ";" {
+      return pre + kw + " " + id + pre2 + ": " + mapType(t) + " = " + expr + ";" + post;
+    }
+  / pre:_ kw:("var"/"let"/"const") __ id:Identifier pre2:_ "=" _ expr:Expression post:_ ";" {
+      return pre + kw + " " + id + pre2 + " = " + expr + ";" + post;
+    }
 
 TopLevelAssignmentStmt
-  = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return "constraint " + lhs + " = " + rhs + ";\n"; }
+  = pre:_ lhs:Assignable pre2:_ "=" _ rhs:Expression post:_ ";" {
+      return pre + "constraint " + lhs + pre2 + " = " + rhs + ";" + post;
+    }
 
 /* ---------------- Top-level if / else if / else ---------------- */
 TopLevelIfStmt
-  = _ "if" _ "(" _ cond:Expression _ ")" _ then:InnerBlock _ elseifClauses:TopLevelElseIfClause* _ elsePart:TopLevelElseClause? {
-      let code = "constraint if " + cond + " then\n" + then;
-      for (let e of elseifClauses) code += "\nelse if " + e.cond + " then\n" + e.block;
-      if (elsePart) code += "\nelse\n" + elsePart;
-      code += "\nendif;\n";
+  = pre:_ "if" pre2:_ "(" _ cond:Expression _ ")" pre3:_ then:InnerBlock _ elseifClauses:TopLevelElseIfClause* _ elsePart:TopLevelElseClause? post:_ {
+      let code = pre + "constraint if" + pre2 + "(" + cond + ")" + pre3 + then;
+      for (let e of elseifClauses) code += "\nelse if (" + e.cond + ")" + e.block;
+      if (elsePart) code += "\nelse" + elsePart;
+      code += "\nendif;" + post;
       return code;
     }
 
 TopLevelElseIfClause
-  = _ "else" _ "if" _ "(" _ cond:Expression _ ")" _ block:InnerBlock { return {cond, block}; }
+  = _ "else" _ "if" pre:_ "(" _ cond:Expression _ ")" pre2:_ block:InnerBlock { return {cond, block}; }
 
 TopLevelElseClause
-  = _ "else" _ block:InnerBlock { return block; }
+  = _ "else" pre:_ block:InnerBlock { return block; }
 
 /* ---------------- Inner statements and blocks ---------------- */
 Statement
@@ -108,44 +128,55 @@ Statement
   / ExprStmt
 
 InnerVarDecl
-  = _ ("var"/"let"/"const") __ id:Identifier _ ":" _ t:Type _ "=" _ expr:Expression _ ";" _ { return mapType(t) + ": " + id + " = " + expr; }
-  / _ ("var"/"let"/"const") __ id:Identifier _ "=" _ expr:Expression _ ";" _ { return "any: " + id + " = " + expr; }
+  = pre:_ kw:("var"/"let"/"const") __ id:Identifier pre2:_ ":" _ t:Type _ "=" _ expr:Expression post:_ ";" { 
+      return pre + kw + " " + id + pre2 + ": " + mapType(t) + " = " + expr + post; 
+    }
+  / pre:_ kw:("var"/"let"/"const") __ id:Identifier pre2:_ "=" _ expr:Expression post:_ ";" { 
+      return pre + kw + " " + id + pre2 + " = " + expr + post; 
+    }
 
 InnerAssignment
-  = _ lhs:Assignable _ "=" _ rhs:Expression _ ";" _ { return lhs + " = " + rhs; }
+  = pre:_ lhs:Assignable pre2:_ "=" _ rhs:Expression post:_ ";" { 
+      return pre + lhs + pre2 + " = " + rhs + post; 
+    }
 
 ReturnStmt
-  = _ "return" __ expr:Expression _ ";" _ { return expr; }
+  = pre:_ "return" __ expr:Expression post:_ ";" { return pre + "return " + expr + post; }
 
 ExprStmt
-  = _ expr:Expression _ ";" _ { return expr; }
+  = pre:_ expr:Expression post:_ ";" { return pre + expr + post; }
 
 IfStmt
-  = _ "if" _ "(" _ cond:Expression _ ")" _ then:InnerBlock _ elsePart:ElseClause? {
-      return "if " + cond + " then\n" + then + (elsePart ? ("else\n" + elsePart) : "") + "\nendif";
+  = pre:_ "if" pre2:_ "(" _ cond:Expression _ ")" pre3:_ then:InnerBlock _ elsePart:ElseClause? post:_ {
+      let code = pre + "if" + pre2 + "(" + cond + ")" + pre3 + then;
+      if (elsePart) code += "\nelse" + elsePart;
+      code += "\nendif" + post;
+      return code;
     }
 
 ElseClause
-  = _ "else" _ stmt:(IfStmt / InnerBlock) { return stmt; }
+  = _ "else" pre:_ stmt:(IfStmt / InnerBlock) { return stmt; }
 
 InnerBlock
-  = "{" _ stmts:Statement* _ "}" { return stmts.join("\n"); }
+  = "{" pre:_ stmts:(Statement _)* post:_ "}" { 
+      return pre + stmts.map(s=>s[0]).join("") + post; 
+    }
 
 /* ---------------- Functions ---------------- */
 FunctionDecl
-  = _ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ body:InnerBlock _ {
+  = pre:_ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ body:InnerBlock post:_ {
       const ps = params ? params.join(", ") : "";
-      return "function " + mapType(ret) + ": " + id + "(" + ps + ") = " + body + ";\n";
+      return pre + "function " + id + "(" + ps + ") = " + body + ";" + post;
     }
 
 FunctionDeclOnly
-  = _ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ ";" _ {
+  = pre:_ "function" __ id:Identifier _ "(" _ params:ParamList? _ ")" _ ":" _ ret:Type _ ";" post:_ {
       const ps = params ? params.join(", ") : "";
-      return "% function prototype: " + mapType(ret) + " " + id + "(" + ps + ");\n";
+      return pre + "% function prototype: " + mapType(ret) + " " + id + "(" + ps + ");" + post;
     }
 
 ParamList = head:Param tail:(_ "," _ Param)* { return [head].concat(tail.map(t=>t[3])); }
-Param = id:Identifier _ ":" _ t:Type { return mapType(t) + ": " + id; }
+Param = id:Identifier pre:_ ":" _ t:Type { return mapType(t) + ": " + id; }
 
 /* ---------------- Expressions ---------------- */
 Expression = Ternary
@@ -162,12 +193,16 @@ Comparison = left:AddSub tail:(_ CompOp _ AddSub)* { return tail.reduce((acc,t)=
 CompOp = "==" / "!=" / "<=" / ">=" / "<" / ">"
 
 AddSub = left:MulDiv tail:(_ ("+" / "-") _ MulDiv)* { return tail.reduce((acc,t)=>acc + " " + t[1] + " " + t[3], left); }
-MulDiv = left:Exponent tail:(_ ("*" / "/" / "%") _ Exponent)* { return tail.reduce((acc,t)=>t[1]==="%"?acc+" mod "+t[3]:acc+" "+t[1]+" "+t[3], left); }
-Exponent = left:Unary tail:(_ "**" _ Unary)* { return tail.reduce((acc,t)=> "pow(" + acc + ", " + t[3] + ")", left); }
+MulDiv = left:Exponent tail:(_ ("*" / "/" / "%") _ Exponent)* { return tail.reduce((acc,t)=> t[1]==="%" ? acc + " mod " + t[3] : acc + " " + t[1] + " " + t[3], left); }
+Exponent = left:Unary tail:(_ "**" _ Unary)* { return tail.reduce((acc,t)=> acc + " ^ " + t[3], left); }
 
 Unary
   = "-" _ v:Unary { return "-" + v; }
   / "!" _ v:Unary { return "not " + v; }
+  / NewExpr
+
+NewExpr
+  = "new" __ callee:Postfix _ "(" _ args:ArgList? _ ")" { return "new " + callee + "(" + (args||[]).join(", ") + ")"; }
   / Postfix
 
 Postfix
@@ -187,13 +222,8 @@ Primary
   / StringLiteral
   / ArrayLiteral
   / ObjectLiteral
-  / NewExpr
   / Identifier
   / "(" _ e:Expression _ ")" { return "(" + e + ")"; }
-
-/* ---------------- New expression ---------------- */
-NewExpr
-  = "new" __ id:Identifier _ "(" _ args:ArgList? _ ")" { return "new " + id + "(" + (args ? args.join(", ") : "") + ")"; }
 
 /* ---------------- Object literals ---------------- */
 ObjectLiteral
@@ -220,9 +250,10 @@ BaseType = "number" / "boolean" / "string" / Identifier
 
 /* ---------------- Whitespace & comments ---------------- */
 _ = ws:([ \t\r\n]+ / Comment)* { return ws.map(c=>c).join(""); }
-__ = [ \t\r\n]+
+__ = ws:([ \t\r\n]+ / Comment)+ { return ws.map(c=>c).join(""); }
 
 Comment
   = SingleLineComment / MultiLineComment
 SingleLineComment = c:$("//" [^\r\n]*) { return c + "\n"; }
 MultiLineComment = c:$("/*" (!"*/" .)* "*/") { return c + "\n"; }
+
